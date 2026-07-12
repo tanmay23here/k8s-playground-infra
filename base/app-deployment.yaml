@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: playground-api
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: playground-api }
+  template:
+    metadata:
+      labels: { app: playground-api }
+    spec:
+      containers:
+        - name: api
+          image: 031871828038.dkr.ecr.ap-south-1.amazonaws.com/k8s-playground-api:latest
+          ports: [{ containerPort: 8000 }]
+          env:
+            - name: LB_URL
+              value: "ad8fc022c892e49b29a9478f8b4286e7-29674291afb23f19.elb.ap-south-1.amazonaws.com"
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits: { cpu: "500m", memory: "512Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: playground-api
+  namespace: default
+spec:
+  selector: { app: playground-api }
+  ports: [{ port: 80, targetPort: 8000 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: playground-api-ingress
+  namespace: default
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: ad8fc022c892e49b29a9478f8b4286e7-29674291afb23f19.elb.ap-south-1.amazonaws.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: playground-api
+                port: { number: 80 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: playground-frontend
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: playground-frontend }
+  template:
+    metadata:
+      labels: { app: playground-frontend }
+    spec:
+      containers:
+        - name: frontend
+          image: 031871828038.dkr.ecr.ap-south-1.amazonaws.com/k8s-playground-frontend:latest
+          ports: [{ containerPort: 80 }]
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits: { cpu: "200m", memory: "256Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: playground-frontend
+  namespace: default
+spec:
+  selector: { app: playground-frontend }
+  ports: [{ port: 80, targetPort: 80 }]
