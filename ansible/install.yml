@@ -1,0 +1,64 @@
+---
+- name: Install everything on EKS
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    newrelic_license_key: "your_newrelic_api_license_key"
+    cluster_name: "playground-cluster"
+    region: "ap-south-1"
+  tasks:
+    - name: Refresh kubeconfig
+      shell: aws eks update-kubeconfig --region {{ region }} --name {{ cluster_name }}
+
+    - name: Set gp2 as default StorageClass
+      shell: kubectl patch storageclass gp2 -p '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+      ignore_errors: true
+
+    - name: Install NGINX Ingress Controller (AWS variant)
+      shell: kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/aws/deploy.yaml
+
+    - name: Wait for NGINX Ingress to be ready
+      shell: kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=120s
+
+    - name: Create platform-system namespace
+      shell: kubectl create namespace platform-system --dry-run=client -o yaml | kubectl apply -f -
+
+    - name: Apply TTL controller
+      shell: kubectl apply -f "/mnt/d/cloud projects/k8s-playground/manifests/ttl-controller.yaml"
+
+    - name: Add New Relic Helm repo
+      shell: helm repo add newrelic https://helm-charts.newrelic.com && helm repo update
+
+    - name: Create New Relic namespace
+      shell: kubectl create namespace newrelic --dry-run=client -o yaml | kubectl apply -f -
+
+    - name: Install New Relic
+      shell: |
+        helm upgrade --install newrelic-bundle newrelic/nri-bundle \
+          --namespace newrelic --no-hooks \
+          --set global.licenseKey={{ newrelic_license_key }} \
+          --set global.cluster={{ cluster_name }} \
+          --set global.lowDataMode=true \
+          --set newrelic-infrastructure.enabled=true \
+          --set newrelic-infrastructure.privileged=false \
+          --set kube-state-metrics.enabled=false \
+          --set kubeEvents.enabled=false \
+          --set logging.enabled=false \
+          --set metrics-adapter.enabled=false \
+          --timeout 5m
+      ignore_errors: true
+
+    - name: Get Load Balancer URL
+      shell: kubectl get svc -n ingress-nginx -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}'
+      register: lb_url
+      retries: 10
+      delay: 15
+      until: lb_url.stdout != ""
+
+    - name: Save LB URL to file
+      shell: echo "{{ lb_url.stdout }}" > "/mnt/d/cloud projects/k8s-playground/LB_URL.txt"
+
+    - name: Show LB URL
+      debug:
+        msg: "Load Balancer URL: {{ lb_url.stdout }}"
